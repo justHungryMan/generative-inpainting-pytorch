@@ -148,10 +148,15 @@ def test_bbox2mask():
 def local_patch(x, bbox_list):
     assert len(x.size()) == 4
     patches = []
+    pad_x = torch.zeros((x.shape[0], x.shape[1], 128, 128), device=x.device, dtype=x.dtype)
+
     for i, bbox in enumerate(bbox_list):
         t, l, h, w = bbox
-        patches.append(x[i, :, t:t + h, l:l + w])
-    return torch.stack(patches, dim=0)
+        temp = x[i, :, t:t + h, l:l + w]
+        temp = F.interpolate(temp, size=128, mode='linear')
+        # print(pad_x[i, :, :temp.shape[-2], :temp.shape[-1]].shape, temp.shape)
+        pad_x[i, :, :temp.shape[-2], :temp.shape[-1]] = temp
+    return pad_x #torch.stack(patches, dim=0)
 
 
 def mask_image(x, bboxes, config):
@@ -473,7 +478,7 @@ def deprocess(img):
 # get configs
 def get_config(config):
     with open(config, 'r') as stream:
-        return yaml.load(stream)
+        return yaml.safe_load(stream)
 
 
 # Get model list for resume

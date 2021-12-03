@@ -15,11 +15,70 @@ from data.dataset import Dataset
 from utils.tools import get_config, random_bbox, mask_image
 from utils.logger import get_logger
 
+import pandas as pd
+from sklearn.model_selection import train_test_split
+
+# from IQA_pytorch import SSIM
+# import wandb
+from jun_dataset import jun_create
+
 parser = ArgumentParser()
 parser.add_argument('--config', type=str, default='configs/config.yaml',
                     help="training configuration")
 parser.add_argument('--seed', type=int, help='manual seed')
 
+DATAPATH='/opt/project/data1024x1024'
+DATA_CONFIG = {
+    "path": '/opt/project/data1024x1024',
+    "train": {
+        'name': 'celeba_hq',
+        'batch_size': 16,
+        'drop_last': True,
+        'use_landmark': False,
+  
+        'preprocess': 
+            [
+                {
+                    'type': 'tensor'
+                },
+                {
+                    'type': 'normalize',
+                    'params': {
+                        'mean': 0.5,
+                        'std': 0.5
+                    }
+                }
+            ]
+        
+    },
+    'test': {
+        'name': 'celeba_hq',
+        'batch_size': 1,
+        'drop_last': False,
+        'use_landmark': False,
+  
+        'preprocess': 
+            [
+                {
+                    'type': 'tensor'
+                },
+                {
+                    'type': 'resize',
+                    'params': {
+                        'size': 256
+                    }
+                },
+                {
+                    'type': 'normalize',
+                    'params': {
+                        'mean': 0.5,
+                        'std': 0.5
+                    }
+                }
+            ]
+        
+    }
+}
 
 def main():
     args = parser.parse_args()
@@ -59,19 +118,39 @@ def main():
 
     try:  # for unexpected error logging
         # Load the dataset
-        logger.info("Training on dataset: {}".format(config['dataset_name']))
-        train_dataset = Dataset(data_path=config['train_data_path'],
-                                with_subfolder=config['data_with_subfolder'],
-                                image_shape=config['image_shape'],
-                                random_crop=config['random_crop'])
+        logger.info('===> Loading datasets')
+        data = pd.read_csv(os.path.join(DATAPATH, 'landmark.csv'))
+
+        train_data, test_data = train_test_split(data, test_size=0.025, random_state=42)
+        train_data.reset_index(drop=True, inplace=True)
+        train_data = train_data.rename_axis('index').reset_index()
+        test_data.reset_index(drop=True, inplace=True)
+        test_data = test_data.rename_axis('index').reset_index()
+
+        train_loader = jun_create(
+            DATA_CONFIG,
+            dataset=train_data,
+            mode='train'
+        )
+        test_loader = jun_create(
+            DATA_CONFIG,
+            dataset=test_data,
+            mode='test'
+        )
+        # train_dataset = Dataset(data_path=config['train_data_path'],
+        #                         with_subfolder=config['data_with_subfolder'],
+        #                         image_shape=config['image_shape'],
+        #                         random_crop=config['random_crop'])
+
+        
         # val_dataset = Dataset(data_path=config['val_data_path'],
         #                       with_subfolder=config['data_with_subfolder'],
         #                       image_size=config['image_size'],
         #                       random_crop=config['random_crop'])
-        train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
-                                                   batch_size=config['batch_size'],
-                                                   shuffle=True,
-                                                   num_workers=config['num_workers'])
+        # train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
+        #                                            batch_size=config['batch_size'],
+        #                                            shuffle=True,
+        #                                            num_workers=config['num_workers'])
         # val_loader = torch.utils.data.DataLoader(dataset=val_dataset,
         #                                           batch_size=config['batch_size'],
         #                                           shuffle=False,
@@ -98,22 +177,25 @@ def main():
 
         for iteration in range(start_iteration, config['niter'] + 1):
             try:
-                ground_truth = next(iterable_train_loader)
+                (input_masked, target, _, masked, bboxes) = next(iterable_train_loader)
+                # ground_truth = next(iterable_train_loader)
             except StopIteration:
                 iterable_train_loader = iter(train_loader)
-                ground_truth = next(iterable_train_loader)
+                (input_masked, target, _, masked, bboxes) = next(iterable_train_loader)
+                # ground_truth = next(iterable_train_loader)
 
             # Prepare the inputs
-            bboxes = random_bbox(config, batch_size=ground_truth.size(0))
-            x, mask = mask_image(ground_truth, bboxes, config)
+            # bboxes = random_bbox(config, batch_size=ground_truth.size(0))
+            # x, mask = mask_image(ground_truth, bboxes, config)
             if cuda:
-                x = x.cuda()
-                mask = mask.cuda()
-                ground_truth = ground_truth.cuda()
+                input_masked = input_masked.cuda()
+                # x = x.cuda()
+                masked = masked.cuda()
+                target = target.cuda()
 
             ###### Forward pass ######
             compute_g_loss = iteration % config['n_critic'] == 0
-            losses, inpainted_result, offset_flow = trainer(x, bboxes, mask, ground_truth, compute_g_loss)
+            losses, inpainted_result, offset_flow = trainer(input_masked, bboxes, masked, target, compute_g_loss)
             # Scalars from different devices are gathered into vectors
             for k in losses.keys():
                 if not losses[k].dim() == 0:

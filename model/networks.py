@@ -405,7 +405,7 @@ class LocalDis(nn.Module):
         self.device_ids = device_ids
 
         self.dis_conv_module = DisConvModule(self.input_dim, self.cnum)
-        self.linear = nn.Linear(self.cnum*4*8*8, 1)
+        self.linear = nn.Linear(int(self.cnum*4*8*8), 1)
 
     def forward(self, x):
         x = self.dis_conv_module(x)
